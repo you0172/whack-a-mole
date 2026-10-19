@@ -1,0 +1,3 @@
+# whack-a-mole
+
+Initializing…
