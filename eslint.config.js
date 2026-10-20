@@ -3,7 +3,18 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'coverage/**', 'node_modules/**', 'eslint.config.js', 'docs/capture.mjs'],
+    // `scripts/` holds plain-Node tooling (browser smoke test, size gate). It is not
+    // part of the TypeScript project, so type-aware linting cannot parse it — the
+    // same reason `docs/capture.mjs` is ignored below.
+    ignores: [
+      'dist/**',
+      'coverage/**',
+      'node_modules/**',
+      'artifacts/**',
+      'scripts/**',
+      'eslint.config.js',
+      'docs/capture.mjs',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,

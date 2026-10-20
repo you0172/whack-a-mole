@@ -1,12 +1,15 @@
 import './styles/main.css';
+import './styles/v2.css';
 import { Sfx } from './audio/sfx';
-import { GameEngine } from './game/engine';
-import { rankFor } from './game/scoring';
-import type { GameEvent } from './game/types';
+import { copy } from './copy';
+import { createAnalytics, goalResultProps, roundEndProps } from './game/analytics';
+import { dailySeed, dateKey, isDailyDone } from './game/daily';
+import { GameEngine, seededRandom } from './game/engine';
+import { loadSave, recordRound, writeSave, type SaveData } from './storage/save';
 import { createBoard } from './ui/board';
+import { createEffects } from './ui/effects';
 import { createHud } from './ui/hud';
 import { createOverlay } from './ui/overlay';
-import { readBestScore, writeBestScore } from './storage/highscores';
 
 const requireEl = <T extends HTMLElement>(id: string): T => {
   const element = document.getElementById(id);
@@ -14,22 +17,30 @@ const requireEl = <T extends HTMLElement>(id: string): T => {
   return element as T;
 };
 
+type Mode = 'normal' | 'daily';
+
+const appEl = requireEl('app');
 const boardEl = requireEl('board');
 const pauseButton = requireEl<HTMLButtonElement>('pause-btn');
 const soundButton = requireEl<HTMLButtonElement>('sound-toggle');
 const announcer = requireEl('announcer');
 
-const engine = new GameEngine();
-const sfx = new Sfx();
-const hud = createHud();
-const overlay = createOverlay();
-
-let best = readBestScore();
+let save: SaveData = loadSave();
+let mode: Mode = 'normal';
+let engine = new GameEngine();
 let rafId = 0;
 let lastTimestamp = 0;
 let running = false;
+/** Guards the visibilitychange pause against pre-render / prerender events (#20). */
+let userEngaged = false;
 
+const sfx = new Sfx();
+sfx.setMuted(!save.settings.audio);
+const analytics = createAnalytics();
+const hud = createHud();
+const overlay = createOverlay();
 const board = createBoard(boardEl, engine.config.holes, (hole) => whack(hole));
+const effects = createEffects(boardEl);
 
 /* ------------------------------------------------------------------ */
 /* Announcements (screen readers)                                      */
@@ -48,21 +59,36 @@ const announce = (message: string): void => {
 /* Round lifecycle                                                     */
 /* ------------------------------------------------------------------ */
 
-const syncPauseButton = (phase: 'idle' | 'playing' | 'paused' | 'over'): void => {
+const syncPauseButton = (): void => {
+  const phase = engine.snapshot.phase;
   pauseButton.disabled = phase === 'idle' || phase === 'over';
-  pauseButton.setAttribute('aria-label', phase === 'paused' ? 'Resume game' : 'Pause game');
+  pauseButton.setAttribute('aria-label', phase === 'paused' ? '继续游戏' : '暂停游戏');
   const icon = pauseButton.querySelector('span');
   if (icon) icon.textContent = phase === 'paused' ? '▶' : '⏸';
 };
 
-const startRound = (): void => {
+const createEngine = (nextMode: Mode): GameEngine =>
+  nextMode === 'daily'
+    ? new GameEngine({}, seededRandom(dailySeed(new Date())))
+    : new GameEngine({}, Math.random);
+
+const startRound = (nextMode: Mode = 'normal'): void => {
+  userEngaged = true;
+  mode = nextMode;
+  engine = createEngine(nextMode);
   sfx.unlock();
   sfx.start();
   engine.start();
   board.reset();
-  hud.reset(best);
+  effects.reset();
+  hud.reset(save.bestScore);
   overlay.hide();
-  syncPauseButton('playing');
+  syncPauseButton();
+  analytics.emit('round_start', {
+    mode,
+    seed: nextMode === 'daily' ? dailySeed(new Date()) : 0,
+    goal: engine.goalDefinition.id,
+  });
   running = true;
   lastTimestamp = 0;
   cancelAnimationFrame(rafId);
@@ -73,20 +99,36 @@ const endRound = (): void => {
   running = false;
   cancelAnimationFrame(rafId);
   const snapshot = engine.snapshot;
-  const isNewBest = snapshot.score > best;
-  best = writeBestScore(snapshot.score);
-  board.reset();
-  syncPauseButton('over');
-  sfx.gameOver();
-  overlay.showResult({
-    score: snapshot.score,
-    best,
-    isNewBest,
-    rank: rankFor(snapshot.score),
-    stats: snapshot.stats,
-    bestCombo: snapshot.bestCombo,
+  const previousBest = save.bestScore;
+  const result = recordRound(save, {
+    score: snapshot.finalScore,
+    combo: snapshot.bestCombo,
+    comboMs: snapshot.comboMs,
+    // R10: playing the daily round is what marks it done; the round goal is a
+    // separate mechanic and must not gate this.
+    dailyDate: mode === 'daily' ? dateKey(new Date()) : save.dailyDone,
   });
-  hud.update(snapshot, best, engine.config);
+  save = result.save;
+  const isNewBest = snapshot.finalScore > previousBest && snapshot.finalScore > 0;
+
+  board.reset();
+  effects.reset();
+  syncPauseButton();
+  sfx.gameOver();
+  analytics.emit('round_end', roundEndProps(snapshot));
+  analytics.emit('goal_result', goalResultProps(snapshot));
+  announce(isNewBest ? copy.announce.newBest : copy.result.eyebrow);
+  overlay.showResult({
+    score: snapshot.finalScore,
+    baseScore: snapshot.score,
+    bonus: snapshot.finalScore - snapshot.score,
+    best: save.bestScore,
+    isNewBest,
+    bestCombo: snapshot.bestCombo,
+    goal: snapshot.goal,
+    stats: snapshot.stats,
+  });
+  hud.update(snapshot, save.bestScore, engine.config);
 };
 
 const setPaused = (paused: boolean): void => {
@@ -94,12 +136,14 @@ const setPaused = (paused: boolean): void => {
     engine.pause();
     running = false;
     cancelAnimationFrame(rafId);
-    syncPauseButton('paused');
+    syncPauseButton();
     overlay.showPaused(engine.snapshot.score);
+    announce(copy.announce.paused);
   } else {
     engine.resume();
     overlay.hide();
-    syncPauseButton('playing');
+    syncPauseButton();
+    announce(copy.announce.resumed);
     running = true;
     lastTimestamp = 0;
     rafId = requestAnimationFrame(loop);
@@ -116,24 +160,6 @@ const togglePause = (): void => {
 /* Main loop                                                           */
 /* ------------------------------------------------------------------ */
 
-const handleEvents = (events: GameEvent[]): void => {
-  for (const event of events) {
-    switch (event.type) {
-      case 'escape':
-        sfx.escape();
-        break;
-      case 'levelup':
-        sfx.levelUp();
-        announce(`Level ${event.level}`);
-        break;
-      case 'spawn':
-        break;
-      default:
-        break;
-    }
-  }
-};
-
 const loop = (timestamp: number): void => {
   if (!running) return;
 
@@ -141,11 +167,35 @@ const loop = (timestamp: number): void => {
   lastTimestamp = timestamp;
 
   const events = engine.tick(dt);
-  handleEvents(events);
+
+  for (const event of events) {
+    switch (event.type) {
+      case 'escape':
+        sfx.escape();
+        analytics.emit('escape', {
+          type: event.mole.kind,
+          hole: event.mole.hole,
+          ttl: event.mole.ttlMs,
+          level: engine.snapshot.level,
+        });
+        break;
+      case 'levelup':
+        sfx.levelUp();
+        announce(copy.announce.level(event.level));
+        break;
+      case 'goal': {
+        sfx.goal();
+        announce(copy.announce.goal(event.goal.label));
+        break;
+      }
+      default:
+        break;
+    }
+  }
 
   const snapshot = engine.snapshot;
   board.render(snapshot);
-  hud.update(snapshot, best, engine.config);
+  hud.update(snapshot, save.bestScore, engine.config);
 
   if (events.some((event) => event.type === 'gameover')) {
     endRound();
@@ -160,39 +210,67 @@ const loop = (timestamp: number): void => {
 /* ------------------------------------------------------------------ */
 
 function whack(hole: number): void {
+  userEngaged = true;
   sfx.unlock();
+  const snapshotBefore = engine.snapshot;
   const result = engine.whack(hole);
   if (result.outcome === 'ignored') return;
+
+  const snapshot = engine.snapshot;
+
+  if (result.outcome === 'empty') {
+    // R2: a miss is acknowledged, never punished.
+    sfx.empty();
+    board.pulse(hole, 'empty');
+    analytics.emit('miss_click', {
+      hole,
+      level: snapshotBefore.level,
+      t_ms: snapshotBefore.elapsedMs,
+    });
+    return;
+  }
+
+  analytics.emit('hit', {
+    type: result.outcome === 'golden' ? 'golden' : result.outcome === 'bomb' ? 'bomb' : 'normal',
+    hole,
+    combo_before: snapshotBefore.combo,
+    level: snapshotBefore.level,
+    t_ms: snapshotBefore.elapsedMs,
+  });
 
   if (result.outcome === 'hit') {
     sfx.hit(result.combo);
     board.pulse(hole, 'hit');
-    if (multiplierLabel(result.multiplier)) {
-      announce(
-        `Hit for ${result.points}. Combo ${result.combo}, ${multiplierLabel(result.multiplier)}.`,
-      );
-    } else {
-      announce(`Hit for ${result.points}. Combo ${result.combo}.`);
-    }
+    effects.floatText(hole, `+${result.points}`, 'good');
+    effects.burst(hole, 'good');
+    announce(copy.announce.hit(result.points, result.combo, result.multiplier));
   } else if (result.outcome === 'golden') {
     sfx.golden();
     board.pulse(hole, 'golden');
-    announce(`Golden mole! ${result.points} points.`);
-  } else if (result.outcome === 'bomb') {
+    effects.floatText(hole, `+${result.points}`, 'gold');
+    effects.burst(hole, 'gold');
+    announce(copy.announce.golden(result.points));
+  } else {
     sfx.bomb();
     board.pulse(hole, 'bomb');
-    announce(`Bomb. Minus ${Math.abs(result.points)} points.`);
+    effects.floatText(hole, `−${Math.abs(result.points)}`, 'bad');
+    effects.burst(hole, 'bad');
+    announce(copy.announce.bomb(result.points));
   }
 
-  if (result.outcome !== 'empty') {
-    hud.update(engine.snapshot, best, engine.config);
-  }
+  hud.update(snapshot, save.bestScore, engine.config);
 }
 
-const multiplierLabel = (multiplier: number): string =>
-  multiplier > 1 ? `${multiplier} times multiplier` : '';
+const syncSoundButton = (): void => {
+  const muted = sfx.isMuted;
+  soundButton.setAttribute('aria-pressed', String(!muted));
+  soundButton.setAttribute('aria-label', muted ? '打开声音' : '静音');
+  const icon = soundButton.querySelector('span');
+  if (icon) icon.textContent = muted ? '🔇' : '🔊';
+};
 
 document.addEventListener('keydown', (event) => {
+  if (event.target instanceof HTMLInputElement) return;
   const key = event.key;
 
   if (key >= '1' && key <= '9') {
@@ -206,12 +284,21 @@ document.addEventListener('keydown', (event) => {
 
   switch (key.toLowerCase()) {
     case 'p':
+    case 'escape':
       event.preventDefault();
       togglePause();
       break;
     case 'r':
       event.preventDefault();
-      startRound();
+      startRound(mode);
+      break;
+    case 'm':
+      event.preventDefault();
+      sfx.unlock();
+      sfx.toggleMuted();
+      save = writeSave({ ...save, settings: { audio: !sfx.isMuted } });
+      syncSoundButton();
+      announce(sfx.isMuted ? copy.announce.soundOff : copy.announce.soundOn);
       break;
     case ' ':
       if (overlay.mode === 'paused') {
@@ -219,7 +306,7 @@ document.addEventListener('keydown', (event) => {
         setPaused(false);
       } else if (engine.snapshot.phase !== 'playing') {
         event.preventDefault();
-        startRound();
+        startRound('normal');
       }
       break;
     default:
@@ -229,26 +316,40 @@ document.addEventListener('keydown', (event) => {
 
 overlay.onAction(() => {
   if (overlay.mode === 'paused') setPaused(false);
-  else startRound();
+  else startRound('normal');
+});
+
+overlay.onSecondary(() => {
+  startRound('daily');
 });
 
 pauseButton.addEventListener('click', () => {
+  userEngaged = true;
   sfx.unlock();
   togglePause();
 });
 
 soundButton.addEventListener('click', () => {
+  userEngaged = true;
   sfx.unlock();
-  const muted = sfx.toggleMuted();
-  soundButton.setAttribute('aria-pressed', String(!muted));
-  soundButton.setAttribute('aria-label', muted ? 'Unmute sound' : 'Mute sound');
-  const icon = soundButton.querySelector('span');
-  if (icon) icon.textContent = muted ? '🔇' : '🔊';
-  announce(muted ? 'Sound off' : 'Sound on');
+  sfx.toggleMuted();
+  save = writeSave({ ...save, settings: { audio: !sfx.isMuted } });
+  syncSoundButton();
+  announce(sfx.isMuted ? copy.announce.soundOff : copy.announce.soundOn);
 });
 
 document.addEventListener('visibilitychange', () => {
+  // Review #20: only a real, engaged user losing focus pauses the round; a
+  // prerender or background prefetch must not put the game into PAUSED.
+  if (!userEngaged) return;
   if (document.hidden && engine.snapshot.phase === 'playing') setPaused(true);
+});
+
+// Review #21: a round abandoned mid-way still reports a partial round_end, so the
+// funnel is not silently missing players (browser support for pagehide permitting).
+globalThis.addEventListener('pagehide', () => {
+  if (engine.snapshot.phase !== 'playing') return;
+  analytics.emit('round_end', { ...roundEndProps(engine.snapshot), partial: true });
 });
 
 /* ------------------------------------------------------------------ */
@@ -258,7 +359,12 @@ document.addEventListener('visibilitychange', () => {
 const reduceMotion = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 if (reduceMotion) document.documentElement.classList.add('reduce-motion');
 
-hud.reset(best);
+syncSoundButton();
+hud.reset(save.bestScore);
 board.reset();
-syncPauseButton('idle');
-overlay.showStart(best);
+syncPauseButton();
+overlay.showStart(save.bestScore, isDailyDone(save.dailyDone, new Date()));
+analytics.emit('session_start', { ref: document.referrer || 'direct' });
+
+// Tells the browser smoke test (and any future E2E) that the app finished booting.
+appEl.dataset.ready = 'true';

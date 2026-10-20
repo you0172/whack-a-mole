@@ -1,0 +1,249 @@
+/* ---------------------------------------------------------------------------
+   v2.0 additions (PRD v2.0 §4.3.2 / §4.6 / §4.8 / §4.9 / R9)
+   Kept in its own file so the v1 stylesheet stays diffable.
+   --------------------------------------------------------------------------- */
+
+/* --- Round goal strip (R9): its own row so the five HUD items stay untouched */
+
+.goal {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 auto 10px;
+  padding: 8px 14px;
+  max-width: 620px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
+.goal__label {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--panel-strong);
+  color: var(--accent-soft);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+}
+
+.goal__text {
+  color: var(--text);
+}
+
+.goal__progress {
+  margin-left: auto;
+  font-family: var(--mono);
+  color: var(--accent-soft);
+}
+
+.goal.is-done {
+  border-color: rgba(74, 222, 128, 0.55);
+  background: rgba(74, 222, 128, 0.1);
+}
+
+.goal.is-done .goal__progress {
+  color: var(--good);
+}
+
+/* --- 3× combo frame glow (§4.3.2: "don't break it") ---------------------- */
+
+#app.is-fever .board {
+  box-shadow:
+    0 0 0 2px rgba(255, 209, 102, 0.55),
+    0 0 42px -6px rgba(255, 209, 102, 0.45);
+  transition: box-shadow 220ms ease-out;
+}
+
+/* --- Target shapes: shape first, colour only as a helper (§4.6 / R12) ---- */
+
+.hole {
+  position: relative;
+}
+
+.mole__marker {
+  position: absolute;
+  top: -6px;
+  right: 18%;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.55);
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.hole--active .mole__marker {
+  opacity: 1;
+}
+
+/* normal = round dot */
+.hole[data-kind='normal'] .mole__marker {
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+/* golden = diamond */
+.hole[data-kind='golden'] .mole__marker {
+  border-radius: 2px;
+  background: var(--gold);
+  transform: rotate(45deg) scale(1.15);
+}
+
+/* bomb = square with a stub fuse */
+.hole[data-kind='bomb'] .mole__marker {
+  border-radius: 2px;
+  background: var(--danger);
+}
+
+.hole[data-kind='bomb'] .mole__marker::after {
+  content: '';
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  width: 2px;
+  height: 7px;
+  background: var(--danger);
+  transform: translateX(-50%);
+}
+
+/* --- Hit feedback: floating number + particles (§4.6) ------------------- */
+
+.float {
+  position: absolute;
+  left: 50%;
+  top: 26%;
+  z-index: 4;
+  transform: translate(-50%, 0);
+  font: 700 1.05rem/1 var(--mono);
+  pointer-events: none;
+  animation: float-up 400ms ease-out forwards;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.55);
+}
+
+.float--good {
+  color: var(--good);
+}
+
+.float--gold {
+  color: var(--gold);
+}
+
+.float--bad {
+  color: var(--danger);
+}
+
+@keyframes float-up {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px) scale(0.9);
+  }
+  25% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    /* PRD §4.6: floats rise 24 px over 400 ms */
+    transform: translate(-50%, -24px) scale(1);
+  }
+}
+
+.particle {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  width: 2px;
+  height: 8px;
+  border-radius: 2px;
+  pointer-events: none;
+  background: var(--text);
+  animation: particle-out 140ms ease-out forwards;
+}
+
+.particle--good {
+  background: var(--good);
+}
+
+.particle--gold {
+  background: var(--gold);
+}
+
+.particle--bad {
+  background: var(--danger);
+}
+
+@keyframes particle-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, 0) rotate(var(--angle)) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -4px) rotate(var(--angle)) translateY(calc(var(--distance) * -1));
+  }
+}
+
+/* --- Miss feedback: a dry tick, no punishment (R2) --------------------- */
+
+.hole--empty {
+  animation: hole-miss 160ms ease-out;
+}
+
+@keyframes hole-miss {
+  0% {
+    transform: translateY(1px);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+/* --- Settlement: readable in under three seconds (§10.3) ---------------- */
+
+/* A heavier scrim than v1's: the board behind the card must not compete with
+   the numbers you are meant to read in three seconds. */
+.overlay {
+  background: rgba(6, 12, 16, 0.84);
+}
+
+.overlay__detail {
+  margin: 10px 0 2px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-family: var(--mono);
+}
+
+.overlay__detail[hidden] {
+  display: none;
+}
+
+.overlay__card--record {
+  border-color: rgba(255, 209, 102, 0.55);
+  box-shadow:
+    var(--shadow),
+    0 0 0 1px rgba(255, 209, 102, 0.35);
+}
+
+.overlay__stats dd.is-emphasis {
+  font-size: 1.15rem;
+  color: var(--gold);
+}
+
+.btn--ghost {
+  margin-top: 10px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding: 8px 14px;
+}
+
+.btn--ghost:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.btn--ghost[hidden] {
+  display: none;
+}

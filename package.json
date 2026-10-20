@@ -35,6 +35,9 @@
     "coverage": "vitest run --coverage",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "size": "node scripts/size-gate.mjs",
+    "smoke": "node scripts/browser-smoke.mjs",
+    "verify": "tsc --noEmit && vitest run --coverage && vite build && node scripts/size-gate.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
