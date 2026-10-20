@@ -1,32 +1,32 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="color-scheme" content="dark" />
     <meta
       name="description"
-      content="Whack-a-Mole — a polished, accessible browser game built with TypeScript. 60 seconds, combos, golden moles and bombs."
+      content="打地鼠 —— 打开即玩的反应力小游戏。60 秒，九个洞，连击、金鼠与炸弹。零素材、零依赖、可离线。"
     />
     <meta name="theme-color" content="#0f2027" />
 
-    <meta property="og:title" content="Whack-a-Mole" />
+    <meta property="og:title" content="打地鼠 — 60 秒反应力" />
     <meta
       property="og:description"
-      content="60 seconds. Nine holes. Combos, golden moles and bombs. An accessible whack-a-mole built with TypeScript."
+      content="60 秒，九个洞。连击倍增、金鼠抢分、炸弹忍住。打开即玩，无广告无内购。"
     />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
 
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-    <title>Whack-a-Mole — 60 seconds of reflex</title>
+    <title>打地鼠 — 60 秒反应力</title>
   </head>
   <body>
     <div id="app">
       <header class="topbar">
         <h1 class="brand">
           <span class="brand__mark" aria-hidden="true">🔨</span>
-          <span class="brand__text">Whack<span class="brand__accent">-a-</span>Mole</span>
+          <span class="brand__text">打<span class="brand__accent">地</span>鼠</span>
         </h1>
         <div class="topbar__actions">
           <button
@@ -34,71 +34,79 @@
             class="icon-btn"
             type="button"
             aria-pressed="true"
-            aria-label="Mute sound"
+            aria-label="静音"
           >
             <span aria-hidden="true">🔊</span>
           </button>
-          <button id="pause-btn" class="icon-btn" type="button" aria-label="Pause game" disabled>
+          <button id="pause-btn" class="icon-btn" type="button" aria-label="暂停游戏" disabled>
             <span aria-hidden="true">⏸</span>
           </button>
         </div>
       </header>
 
       <main class="stage">
-        <section class="hud" aria-label="Game status">
+        <section class="hud" aria-label="对局状态">
           <div class="hud__item">
-            <span class="hud__label">Score</span>
+            <span class="hud__label">分数</span>
             <span class="hud__value" id="score" aria-live="off">0</span>
           </div>
           <div class="hud__item">
-            <span class="hud__label">Combo</span>
-            <span class="hud__value" id="combo">x1</span>
+            <span class="hud__label">连击</span>
+            <span class="hud__value" id="combo">—</span>
           </div>
           <div class="hud__item">
-            <span class="hud__label">Level</span>
+            <span class="hud__label">等级</span>
             <span class="hud__value" id="level">1</span>
           </div>
           <div class="hud__item">
-            <span class="hud__label">Best</span>
+            <span class="hud__label">最佳</span>
             <span class="hud__value" id="best">0</span>
           </div>
         </section>
 
-        <div class="timer" role="timer" aria-label="Time remaining">
+        <div class="timer" role="timer" aria-label="剩余时间">
           <div class="timer__track">
             <div class="timer__fill" id="timer-fill"></div>
           </div>
           <span class="timer__value" id="timer-value">60</span>
         </div>
 
+        <div class="goal" id="goal">
+          <span class="goal__label">本局目标</span>
+          <span class="goal__text" id="goal-text">—</span>
+          <span class="goal__progress" id="goal-progress">0/0</span>
+        </div>
+
         <div class="board-wrap">
-          <div id="board" class="board" role="group" aria-label="Whack-a-mole board, 9 holes">
+          <div id="board" class="board" role="group" aria-label="打地鼠盘面，九个洞">
             <!-- holes injected -->
           </div>
 
           <div id="overlay" class="overlay" hidden>
-            <div class="overlay__card">
-              <p class="overlay__eyebrow" id="overlay-eyebrow">Ready?</p>
-              <h2 class="overlay__title" id="overlay-title">Whack every mole</h2>
+            <div class="overlay__card" id="overlay-card">
+              <p class="overlay__eyebrow" id="overlay-eyebrow">准备好了吗</p>
+              <h2 class="overlay__title" id="overlay-title">见鼠就打，见炸弹就忍</h2>
               <p class="overlay__body" id="overlay-body">
-                Click or tap a mole. Use keys <kbd>1</kbd>–<kbd>9</kbd> for the keyboard.
+                点一下，或者按 1–9。金鼠 5 倍分，炸弹扣分并清零连击。
               </p>
-              <div class="overlay__stats" id="overlay-stats" hidden></div>
-              <button id="overlay-action" class="btn btn--primary" type="button">Start game</button>
+              <dl class="overlay__stats" id="overlay-stats" hidden></dl>
+              <p class="overlay__detail" id="overlay-detail" hidden></p>
+              <button id="overlay-action" class="btn btn--primary" type="button">开始</button>
+              <button id="overlay-secondary" class="btn btn--ghost" type="button" hidden></button>
             </div>
           </div>
         </div>
 
         <p class="hint">
-          <kbd>1</kbd>–<kbd>9</kbd> to whack · <kbd>P</kbd> pause · <kbd>R</kbd> restart
+          <kbd>1</kbd>–<kbd>9</kbd> 敲击 · <kbd>P</kbd> 暂停 · <kbd>R</kbd> 重开 · <kbd>M</kbd> 静音
         </p>
 
         <p class="sr-only" id="announcer" aria-live="polite" aria-atomic="true"></p>
       </main>
 
       <footer class="footer">
-        <span>Built with TypeScript · No assets · MIT licensed</span>
-        <a href="https://github.com/you0172/whack-a-mole" rel="noreferrer noopener">Source</a>
+        <span>TypeScript 构建 · 零素材 · MIT</span>
+        <a href="https://github.com/you0172/whack-a-mole" rel="noreferrer noopener">源码</a>
       </footer>
     </div>
 
